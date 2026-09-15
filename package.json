@@ -1,0 +1,8 @@
+{
+  "name": "luxartium-chain-local-console",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test_explorer_ui.mjs"
+  }
+}

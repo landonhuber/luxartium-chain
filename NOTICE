@@ -1,0 +1,9 @@
+Luxartium Network v0.1
+
+Application and CLI wiring in app/ and cmd/ is adapted from the Cosmos SDK
+v0.55.0 simapp, commit 64fd208a11fb54f7ffdca1a1290c2cfbbc254e49:
+https://github.com/cosmos/cosmos-sdk/tree/v0.55.0/simapp
+
+The upstream work is distributed under Apache License 2.0; see LICENSE.cosmos-sdk.
+Modifications remove simulation services, minting and unrelated modules; configure
+Luxartium addresses and native fees; and provide isolated local operator tooling.

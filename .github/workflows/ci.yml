@@ -1,0 +1,35 @@
+name: Engine checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check operator and gateway contracts
+        run: python3 -m unittest discover -s . -p 'test_*.py' -v
+      - name: Check exact amounts in the local console
+        run: node --test test_explorer_ui.mjs
+      - name: Build the pinned Linux image and run Go tests
+        run: python3 localnet.py build
+      - name: Verify genesis, transfers, fees and restart on a disposable chain
+        run: python3 localnet.py verify
+      - name: Verify native beta signing and replay on another disposable chain
+        run: python3 verify_beta_gateway.py
+      - name: Verify a second full node synchronizes the same testnet
+        run: python3 verify_join.py

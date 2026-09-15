@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#143c34">
+  <title>Luxartium — Network explorer</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#/" aria-label="Luxartium explorer home"><img src="/favicon.svg" alt="" width="38" height="38"><span>luxartium<span class="brand-sub">NETWORK EXPLORER</span></span></a>
+      <span class="nav-label">EXPLORE</span>
+      <nav aria-label="Main navigation">
+        <a href="#/" data-nav="overview"><span class="nav-icon">◈</span> Overview</a>
+        <a href="#/blocks" data-nav="blocks"><span class="nav-icon">▤</span> Blocks</a>
+        <a href="#/transactions" data-nav="transactions"><span class="nav-icon">⇄</span> Transactions</a>
+      </nav>
+      <div class="sidebar-bottom"><span class="pill">LOCAL TESTNET</span><p>A window into the<br>Luxartium network.</p><p><a href="http://127.0.0.1:4172/">About Luxartium ↗</a></p><small>Test LUXAR · Read-only explorer</small></div>
+    </aside>
+    <div class="main-wrap">
+      <header class="topbar"><span>Luxartium / <strong id="page-label">Overview</strong></span><span id="connection" class="connection">Connecting to node</span></header>
+      <main id="content" tabindex="-1">
+        <form id="search" class="search" role="search"><span aria-hidden="true">⌕</span><label class="sr-only" for="search-input">Search block height, transaction hash or account address</label><input id="search-input" autocomplete="off" spellcheck="false" maxlength="100" placeholder="Search by block height, transaction hash, or address"><button type="submit">Search <span aria-hidden="true">↗</span></button></form>
+        <p id="search-error" class="search-error" role="alert"></p>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <div id="view" aria-busy="true"><div class="loading">Reading the network…</div></div>
+      </main>
+      <footer><span><a href="http://127.0.0.1:4172/">LUXARTIUM</a> <span class="footer-dot">/</span> An independent creative network</span><span>Local testnet · <a href="http://admin.luxartium.localhost:4174/admin/">Admin ↗</a></span></footer>
+    </div>
+  </div>
+</body>
+</html>
