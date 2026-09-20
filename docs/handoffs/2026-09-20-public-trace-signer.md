@@ -7,7 +7,7 @@ transaction was sent by this component task.
 Independent parent review returned **APPROVE for the signer component and pinned
 image**: exact journal replay, atomic trace uniqueness, startup refusal, mirrored
 14-kind codec, receipt validation and hosted route boundary. This approval does
-cover the complete Foundry release. The operator recipe separately received
+not cover the complete Foundry release. The operator recipe separately received
 REVISE for a pre-quiescence snapshot, then APPROVE after fresh post-ingress and
 authoritative offline snapshots plus race/refusal tests were added.
 
