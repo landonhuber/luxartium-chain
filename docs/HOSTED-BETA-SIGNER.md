@@ -53,18 +53,23 @@ update the Foundry Worker secret pair privately, verify authenticated health, th
 retire the old credential. Keep the independent signer bearer in the Worker's
 secret store. Neither credential belongs in source, command arguments or browsers.
 
-Before a signer update or host move, stop the connector, stop the signer and take
-a protected offline backup of the entire signer volume, including every account
-key and the latest SQLite journal. Record the pinned image, genesis and backup
-digest separately. The original cutover export is not a current backup after new
-accounts or operations exist. Restore only with the original writer stopped and
-fenced. Never combine older journal state with newer keys or run two copies.
+Before a signer update or host move, disable **Luxartium Private Beta Signer
+Recovery** and prevent other reconciler invocations. Let any active reconciliation
+finish (coordinate the operator's `reconcile.lock`), then stop the connector and
+signer in that order. Confirm both stay stopped before taking a protected offline
+backup of the entire signer volume, including every account key and the latest
+SQLite journal. Otherwise the every-minute task can restart signing during the copy.
+Record the pinned image, genesis and backup digest separately. The original cutover
+export is not a current backup after new accounts or operations exist. Never combine
+older journal state with newer keys or run two copies.
 
-A website rollback can leave this private signer and its state intact. To move
-signing back to the laptop, transfer the latest complete state first, validate all
-wallet identities and pending operation receipts, fence the dedicated writer, and
-only then activate one restored writer. Do not simply remove the laptop fence or
-restore the original cutover snapshot.
+A website rollback can leave this private signer and its state intact. For a host
+move, including rollback to the laptop, keep the source stopped and fenced from
+before the final snapshot through transfer, destination validation and activation.
+Validate all wallet identities and pending operation receipts before starting the
+destination. Re-enable recovery only on the one selected host after validation;
+leave the other host fenced with recovery disabled. Do not simply remove the laptop
+fence or restore the original cutover snapshot.
 
 ## Verification
 
