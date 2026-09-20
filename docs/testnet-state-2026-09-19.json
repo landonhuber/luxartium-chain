@@ -1,0 +1,194 @@
+{
+  "observed_at_utc": "2026-09-20T02:29:25.226410+00:00",
+  "chain_id": "luxartium-local-1",
+  "first_observed_height": "39610",
+  "note": "Read-only public chain data queried sequentially; not an atomic export. No private keys or operator credentials.",
+  "staking_params": {
+    "params": {
+      "unbonding_time": "1814400s",
+      "max_validators": 100,
+      "max_entries": 7,
+      "historical_entries": 10000,
+      "bond_denom": "uluxar",
+      "min_commission_rate": "0.000000000000000000",
+      "key_rotation_fee": {
+        "denom": "uluxar",
+        "amount": "1000000"
+      }
+    }
+  },
+  "validators": {
+    "validators": [
+      {
+        "operator_address": "luxarvaloper1u6dxvdpk0v8ey4npsksw6mrphclhg02v68mgau",
+        "consensus_pubkey": {
+          "@type": "/cosmos.crypto.ed25519.PubKey",
+          "key": "A/fBIkIGHspCLF7C5XzoZLKdQtzlc5bML4pFoXnZM4Q="
+        },
+        "jailed": false,
+        "status": "BOND_STATUS_BONDED",
+        "tokens": "10000000000",
+        "delegator_shares": "10000000000.000000000000000000",
+        "description": {
+          "moniker": "local-validator",
+          "identity": "",
+          "website": "",
+          "security_contact": "",
+          "details": ""
+        },
+        "unbonding_height": "0",
+        "unbonding_time": "1970-01-01T00:00:00Z",
+        "commission": {
+          "commission_rates": {
+            "rate": "0.100000000000000000",
+            "max_rate": "0.200000000000000000",
+            "max_change_rate": "0.010000000000000000"
+          },
+          "update_time": "2026-09-14T23:29:20.325805313Z"
+        },
+        "min_self_delegation": "1",
+        "unbonding_on_hold_ref_count": "0",
+        "unbonding_ids": []
+      }
+    ],
+    "pagination": {
+      "next_key": null,
+      "total": "1"
+    }
+  },
+  "distribution_params": {
+    "params": {
+      "community_tax": "0.020000000000000000",
+      "base_proposer_reward": "0.000000000000000000",
+      "bonus_proposer_reward": "0.000000000000000000",
+      "withdraw_addr_enabled": true
+    }
+  },
+  "slashing_params": {
+    "params": {
+      "signed_blocks_window": "100",
+      "min_signed_per_window": "0.500000000000000000",
+      "downtime_jail_duration": "600s",
+      "slash_fraction_double_sign": "0.050000000000000000",
+      "slash_fraction_downtime": "0.010000000000000000"
+    }
+  },
+  "governance_params": {
+    "voting_params": {
+      "voting_period": "172800s"
+    },
+    "deposit_params": null,
+    "tally_params": null,
+    "params": {
+      "min_deposit": [
+        {
+          "denom": "uluxar",
+          "amount": "1000000"
+        }
+      ],
+      "max_deposit_period": "172800s",
+      "voting_period": "172800s",
+      "quorum": "0.334000000000000000",
+      "threshold": "0.500000000000000000",
+      "veto_threshold": "0.334000000000000000",
+      "min_initial_deposit_ratio": "0.000000000000000000",
+      "proposal_cancel_ratio": "0.500000000000000000",
+      "proposal_cancel_dest": "",
+      "expedited_voting_period": "86400s",
+      "expedited_threshold": "0.667000000000000000",
+      "expedited_min_deposit": [
+        {
+          "denom": "uluxar",
+          "amount": "10000000"
+        }
+      ],
+      "burn_vote_quorum": false,
+      "burn_proposal_deposit_prevote": false,
+      "burn_vote_veto": true,
+      "min_deposit_ratio": "0.010000000000000000"
+    }
+  },
+  "staking_pool": {
+    "pool": {
+      "not_bonded_tokens": "0",
+      "bonded_tokens": "10000000000"
+    }
+  },
+  "community_pool": {
+    "pool": [
+      {
+        "denom": "uluxar",
+        "amount": "80.000000000000000000"
+      }
+    ]
+  },
+  "supply": {
+    "amount": {
+      "denom": "uluxar",
+      "amount": "1000000000000000"
+    }
+  },
+  "commission": {
+    "commission": {
+      "commission": [
+        {
+          "denom": "uluxar",
+          "amount": "392.000000000000000000"
+        }
+      ]
+    }
+  },
+  "outstanding_rewards": {
+    "rewards": {
+      "rewards": [
+        {
+          "denom": "uluxar",
+          "amount": "3920.000000000000000000"
+        }
+      ]
+    }
+  },
+  "delegations": {
+    "delegation_responses": [
+      {
+        "delegation": {
+          "delegator_address": "luxar1u6dxvdpk0v8ey4npsksw6mrphclhg02vphdxv9",
+          "validator_address": "luxarvaloper1u6dxvdpk0v8ey4npsksw6mrphclhg02v68mgau",
+          "shares": "10000000000.000000000000000000"
+        },
+        "balance": {
+          "denom": "uluxar",
+          "amount": "10000000000"
+        }
+      }
+    ],
+    "pagination": {
+      "next_key": null,
+      "total": "1"
+    }
+  },
+  "proposals": {
+    "proposals": [],
+    "pagination": {
+      "next_key": null,
+      "total": "0"
+    }
+  },
+  "signing_info": {
+    "info": [
+      {
+        "address": "luxarvalcons1q8tmm0w2cnhzfe5vftac0mfxvm77ask7sp9r76",
+        "start_height": "0",
+        "index_offset": "39609",
+        "jailed_until": "1970-01-01T00:00:00Z",
+        "tombstoned": false,
+        "missed_blocks_counter": "0"
+      }
+    ],
+    "pagination": {
+      "next_key": null,
+      "total": "1"
+    }
+  },
+  "last_observed_height": "39610"
+}

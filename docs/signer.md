@@ -1,5 +1,9 @@
 # Local Foundry signer integration
 
+The saved Foundry beta signer moved to the dedicated machine on 2026-09-20.
+Its source journal is fenced. See [hosted operation and recovery](HOSTED-BETA-SIGNER.md)
+before starting a signer; the local setup below describes development usage.
+
 `gateway.py` is an optional trusted operator process, not a public wallet service.
 It connects to the saved local chain and listens only at `127.0.0.1:4175`. Foundry
 business rules, authentication, account records, jobs, ownership and artwork

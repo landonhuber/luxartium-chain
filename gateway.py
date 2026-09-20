@@ -54,6 +54,11 @@ def exclusive_process(path):
 
 class Signer:
     def __init__(self, directory, network=None):
+        # A migrated journal must never become a second writer after a reboot.
+        fence = directory / "signing-moved.json"
+        assert_plain_path(fence)
+        if fence.exists():
+            raise ValueError("SIGNER_MIGRATED_USE_CURRENT_HOST")
         self.network = network or Network()
         self.lock = threading.Lock()
         genesis = self.network.rpc("genesis")["result"]["genesis"]
