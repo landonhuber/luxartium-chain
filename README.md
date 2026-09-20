@@ -9,6 +9,10 @@ This is a working **single-validator local testnet**, not a public network or
 mainnet. **Production is coming soon.** Test tokens have no promised monetary
 value or mainnet conversion.
 
+For the current two-machine topology, staking, voting, fees, rewards, slashing,
+governance and planned capabilities, read [How Luxartium works today](docs/HOW-LUXARTIUM-WORKS.md).
+That reference includes a dated snapshot of the live chain parameters.
+
 The public website and explorer are maintained separately in
 [luxartium-site](https://github.com/landonhuber/luxartium-site) for
 [luxartium.org](https://luxartium.org). This repository runs the chain; a Cloudflare
@@ -87,6 +91,10 @@ Anyone controlling Docker can access those keys. Wallet creation suppresses seed
 output. Never reuse a production wallet or place valuable funds here.
 
 ## Local operator console and Foundry signer
+
+The managed public Foundry testnet uses the separately reviewed
+[private hosted signer](docs/HOSTED-BETA-SIGNER.md). Its keys stay on the dedicated
+machine, with a fenced source and a service-authenticated Cloudflare connection.
 
 ```sh
 python localnet.py sites
