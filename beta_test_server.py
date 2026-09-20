@@ -34,7 +34,9 @@ def main():
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             # Consumed by the parent process, never forwarded to tool/user output.
-            print(json.dumps({'url': 'http://127.0.0.1:' + str(server.server_port), 'key': key, 'genesis': signer.fingerprint}), flush=True)
+            print(json.dumps({'url': 'http://127.0.0.1:' + str(server.server_port), 'key': key, 'genesis': signer.fingerprint,
+                              'rpc_url': 'http://127.0.0.1:' + str(network.ports[0]),
+                              'issuer_address': signer.beta_treasury()}), flush=True)
             sys.stdin.readline()
             server.shutdown()
             thread.join()

@@ -1,5 +1,6 @@
 *
 !hosted_signer.py
 !gateway.py
+!trace_protocol.py
 !localnet.py
 !admin_auth.py

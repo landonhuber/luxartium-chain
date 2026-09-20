@@ -15,6 +15,7 @@ import uuid
 
 from admin_auth import owner_access_key, assert_plain_path
 from localnet import Network, CHAIN_ID, DENOM, FEE, UNIT, run
+from trace_protocol import decode as decode_trace, memo_hash as trace_memo_hash
 
 PORT = 4175
 TREASURY = "foundry-pilot"
@@ -221,8 +222,31 @@ class BetaSigner(Signer):
         self.db.execute("CREATE TABLE IF NOT EXISTS beta_grants (account TEXT PRIMARY KEY, operation TEXT UNIQUE NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS beta_refunds (original_operation TEXT PRIMARY KEY, operation TEXT UNIQUE NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS beta_intents (operation TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS beta_trace_events (memo_hash TEXT PRIMARY KEY, operation TEXT UNIQUE NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS beta_config (id INTEGER PRIMARY KEY CHECK(id=1), treasury_address TEXT NOT NULL)")
         self.db.commit()
+        try:
+            self.assert_trace_journal()
+        except Exception:
+            self.db.close()
+            raise
+
+    def assert_trace_journal(self):
+        # Legacy journals have zero trace intents. Once traces exist, losing their
+        # uniqueness index must refuse startup rather than re-attest under new IDs.
+        trace_intents = {}
+        for row in self.db.execute("SELECT operation,payload FROM beta_intents"):
+            payload = json.loads(row["payload"])
+            if "memo" in payload:
+                if set(payload) != {"operation_id", "genesis_hash", "memo"} or payload["operation_id"] != row["operation"] or payload["genesis_hash"] != self.fingerprint:
+                    raise ValueError("TRACE_JOURNAL_INVALID")
+                digest = trace_memo_hash(payload["memo"])
+                if digest in trace_intents:
+                    raise ValueError("TRACE_JOURNAL_INVALID")
+                trace_intents[digest] = row["operation"]
+        saved_traces = {row["memo_hash"]: row["operation"] for row in self.db.execute("SELECT memo_hash,operation FROM beta_trace_events")}
+        if saved_traces != trace_intents:
+            raise ValueError("TRACE_JOURNAL_INVALID")
 
     @staticmethod
     def key_name(account):
@@ -325,6 +349,30 @@ class BetaSigner(Signer):
                 raise ValueError("KEY_DELIVERY_UNAVAILABLE")
             return {**result, "key_delivery": "awaiting_acknowledgement", "private_key_hex": private_key.lower()}
 
+    def beta_trace(self, body):
+        if not isinstance(body, dict) or set(body) != {"operation_id", "genesis_hash", "memo"}:
+            raise ValueError("INVALID_TRACE_OPERATION")
+        operation = identifier(body["operation_id"])
+        if operation in (BOOTSTRAP, BETA_BOOTSTRAP) or body["genesis_hash"] != self.fingerprint:
+            raise ValueError("WRONG_NETWORK")
+        decode_trace(body["memo"])
+        digest = trace_memo_hash(body["memo"])
+        with self.lock:
+            self.assert_chain()
+            treasury = self.beta_treasury()
+            intent = self.db.execute("SELECT payload FROM beta_intents WHERE operation=?", (operation,)).fetchone()
+            existing = self.db.execute("SELECT payload FROM operations WHERE id=?", (operation,)).fetchone()
+            if any(row and row[0] != canonical(body) for row in (intent, existing)):
+                raise ValueError("IDEMPOTENCY_CONFLICT")
+            saved = self.db.execute("SELECT memo_hash,operation FROM beta_trace_events WHERE memo_hash=? OR operation=?", (digest, operation)).fetchall()
+            if any(row[0] != digest or row[1] != operation for row in saved):
+                raise ValueError("TRACE_EVENT_ALREADY_BOUND")
+            self.db.execute("INSERT OR IGNORE INTO beta_trace_events VALUES (?, ?)", (digest, operation))
+            self.db.execute("INSERT OR IGNORE INTO beta_intents VALUES (?, ?)", (operation, canonical(body)))
+            self.db.commit()
+            result = self.execute(operation, body, BETA_TREASURY, treasury, 1, body["memo"])
+            return {**result, "operation_id": operation, "chain_id": CHAIN_ID, "genesis_hash": self.fingerprint}
+
     def beta_operation(self, body):
         fields = {"operation_id", "kind", "from_account_id", "to_account_id", "amount_uluxar", "reference_hash", "reverses_operation_id", "genesis_hash"}
         if not isinstance(body, dict) or set(body) != fields:
@@ -420,6 +468,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 result = self.server.signer.beta_wallet(body["account_id"])
             elif self.path == "/beta/operation":
                 result = self.server.signer.beta_operation(body)
+            elif self.path == "/beta/trace":
+                result = self.server.signer.beta_trace(body)
             elif self.path == "/beta/health" and body == {}:
                 self.server.signer.assert_chain()
                 result = {"chain_id": CHAIN_ID, "genesis_hash": self.server.signer.fingerprint,

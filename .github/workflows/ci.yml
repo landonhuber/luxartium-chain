@@ -31,5 +31,7 @@ jobs:
         run: python3 localnet.py verify
       - name: Verify native beta signing and replay on another disposable chain
         run: python3 verify_beta_gateway.py
+      - name: Verify typed trace and sealed graph on another disposable chain
+        run: python3 verify_trace.py
       - name: Verify a second full node synchronizes the same testnet
         run: python3 verify_join.py
