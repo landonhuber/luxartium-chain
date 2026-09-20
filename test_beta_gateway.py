@@ -1,6 +1,7 @@
 """HTTP secret isolation and durable retry tests; every key and chain is synthetic."""
 import base64
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -159,6 +160,67 @@ class GatewayHTTPTests(GatewayFixture):
             return response.status, dict(response.getheaders()), response.read()
         finally:
             conn.close()
+
+    def test_health_serializes_shared_journal_and_keyring_reads(self):
+        class OwnedLock:
+            def __init__(self):
+                self.lock = threading.Lock()
+                self.owner = None
+
+            def __enter__(self):
+                self.lock.acquire()
+                self.owner = threading.get_ident()
+
+            def __exit__(self, *_):
+                self.owner = None
+                self.lock.release()
+
+        lock = OwnedLock()
+        self.signer.lock = lock
+        original_chain, original_treasury = self.signer.assert_chain, self.signer.beta_treasury
+        observed = []
+
+        def assert_chain():
+            self.assertEqual(lock.owner, threading.get_ident())
+            observed.append("chain")
+            return original_chain()
+
+        def treasury():
+            self.assertEqual(lock.owner, threading.get_ident())
+            observed.append("treasury")
+            return original_treasury()
+
+        self.signer.assert_chain, self.signer.beta_treasury = assert_chain, treasury
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            responses = list(pool.map(lambda _: self.request("/beta/health", {}), range(8)))
+        for status, headers, raw in responses:
+            self.assertEqual(status, 200)
+            self.assertEqual(headers["Cache-Control"], "no-store")
+            self.assertEqual(json.loads(raw), {"chain_id": CHAIN_ID, "genesis_hash": self.signer.fingerprint,
+                                              "treasury_address": self.network.address(BETA_TREASURY)})
+        self.assertEqual(observed, ["chain", "treasury"] * 8)
+        self.assertEqual(self.network.signatures, 0)
+        self.assertEqual(self.network.exports, 0)
+        self.assertEqual(self.signer.db.execute("SELECT count(*) FROM operations").fetchone()[0], 0)
+
+    def test_health_still_rejects_a_changed_treasury(self):
+        self.network.addresses[BETA_TREASURY] = "changed-synthetic-treasury"
+        status, _, body = self.request("/beta/health", {})
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(body), {"error": "TREASURY_IDENTITY_CHANGED"})
+
+    def test_health_still_rejects_a_missing_treasury(self):
+        self.signer.db.execute("DELETE FROM beta_config")
+        self.signer.db.commit()
+        status, _, body = self.request("/beta/health", {})
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(body), {"error": "TREASURY_IDENTITY_CHANGED"})
+
+    def test_health_still_rejects_a_changed_genesis(self):
+        self.network.genesis["genesis_time"] = "changed-synthetic-genesis"
+        status, _, body = self.request("/beta/health", {})
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(body), {"error": "CHAIN_IDENTITY_CHANGED"})
 
     def test_unauthenticated_and_browser_origin_requests_cannot_export_or_enroll(self):
         attempts = ({"Authorization": None}, {"Authorization": "Bearer wrong"},

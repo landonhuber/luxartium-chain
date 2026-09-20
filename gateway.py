@@ -263,6 +263,14 @@ class BetaSigner(Signer):
                                   BETA_TREASURY_FUNDING, "foundry:beta:treasury:v1")
             return {"treasury_address": address, **result}
 
+    def beta_health(self):
+        # Health shares the same SQLite connection and keyring as signing. Its
+        # execute/fetch sequence must use the same lock as every other request.
+        with self.lock:
+            self.assert_chain()
+            return {"chain_id": CHAIN_ID, "genesis_hash": self.fingerprint,
+                    "treasury_address": self.beta_treasury()}
+
     def beta_treasury(self):
         row = self.db.execute("SELECT treasury_address FROM beta_config WHERE id=1").fetchone()
         if not row or row[0] != self.network.address(BETA_TREASURY):
@@ -471,9 +479,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
             elif self.path == "/beta/trace":
                 result = self.server.signer.beta_trace(body)
             elif self.path == "/beta/health" and body == {}:
-                self.server.signer.assert_chain()
-                result = {"chain_id": CHAIN_ID, "genesis_hash": self.server.signer.fingerprint,
-                          "treasury_address": self.server.signer.beta_treasury()}
+                result = self.server.signer.beta_health()
             else:
                 return self.reply(404, {"error": "Unsupported gateway operation"})
             self.reply(200, result)

@@ -108,3 +108,51 @@ Hosted acceptance, all read-only except the controlled sidecar upgrade:
 
 Public readiness evidence is in ignored `build/hosted-trace-*.json` and
 `build/hosted-trace-upgrade-result.txt`; no credentials or backup bytes are there.
+
+## Concurrent health-read correction prepared during live migration
+
+At 2026-09-20 22:43:25 UTC, a read-only `/beta/health` request returned
+`TREASURY_IDENTITY_CHANGED`. Subsequent independent read-only checks found the
+stored treasury, three keyring address reads, preserved genesis and SQLite
+integrity unchanged. All 2,072 trace intents checked at 22:45 UTC retained their
+exact memo/operation/signed-byte bindings. No key, journal or node was reset.
+
+The hosted Python 3.12.12 / SQLite 3.40.1 runtime can reproduce a shared-connection
+read race. The health handler alone omitted the signer lock used by other serving
+paths. A synthetic in-memory experiment in the exact installed image called the
+actual `beta_treasury` method from eight threads: 32,000 reads produced 23,397 false
+identity errors and two `SystemError` exceptions while the stored identity remained
+unchanged. The same 32,000 reads under the existing lock produced zero errors.
+This behavior matches the upstream
+[CPython shared SQLite read report](https://github.com/python/cpython/issues/118172).
+
+`BetaSigner.beta_health` now holds the existing lock across genesis validation and
+the treasury execute/fetch/keyring comparison. The HTTP adapter delegates to it;
+strict genuine-mismatch errors and the wire contract remain unchanged. The inner
+treasury helper does not take a nested lock.
+
+- All **79 Python unit/HTTP checks** passed. The ten gateway HTTP checks also
+  passed inside the hosted Python image, using only a synthetic temporary database.
+- A deterministic HTTP test checks that each request's thread owns the lock during
+  both identity reads. It also checks the exact response and absence of signing,
+  exports or journal writes. Replacing only the handler with the previous revision
+  in memory makes that regression fail with HTTP 503 instead of 200.
+- Changed treasury, missing treasury and changed genesis still return HTTP 409.
+- Real hosted-signer acceptance passed on uniquely owned disposable chain
+  `luxartium-check-cc5894a46f38`: preserved grants/enrollment, real action and trace
+  replay across restarts, duplicate rejection, node namespace recovery and private
+  mount/HTTP boundaries. Its owned containers, volumes and temporary keys were
+  cleaned up.
+- Prepared local image:
+  `sha256:b101ee0df9e10e534a25833eb4a97adf3ad3f5794f5e747aed255574133882ff`.
+  Its chain binary is still
+  `9e6525c54904c72f688b4c3d827ddda8fb7b1b0bdc938bd0ac395c1d5dcb6512`.
+
+This correction is prepared for a separately coordinated, reviewed signer-only
+upgrade with a fresh consistent backup after the migration batch settles. It has
+not yet replaced the live image. Full live migration proof and final backup remain
+release completion gates; repository pushes run CI only.
+
+Both the parent reviewer and a separate reviewing agent returned **APPROVE** for
+this health-lock correction and the prepared image after the checks above. This
+approval authorizes preparation, not an uncoordinated live restart.
