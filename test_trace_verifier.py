@@ -112,6 +112,32 @@ class TraceGraphTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "MISSING_NATIVE_CREATIVE_RESULT"):
             verify_graph(records, seals, subject, ISSUER)
 
+    def test_publication_source_is_bound_to_actual_artwork_or_paid_workspace(self):
+        records, seals, subject = fixture()
+        records[5] = record(encode("p", cid(IDS["piece"]), cid(IDS["version"]), cid(IDS["account"]), cid(IDS["account"]), "gallery", cid(IDS["other"]), 1500), 6)
+        with self.assertRaisesRegex(ValueError, "GALLERY_SOURCE_ARTWORK_MISMATCH"):
+            verify_graph(records, seals, subject, ISSUER)
+        records = records[:5]
+        attempt, operation = str(uuid.uuid4()), str(uuid.uuid4())
+        paid_hash = "a" * 64
+        records.extend([
+            record(encode("a", cid(attempt), cid(IDS["workspace"]), cid(IDS["account"]), "create_svg", chash("9" * 64)), 6),
+            {"hash": paid_hash, "position": (7, 0), "sender": WALLET, "recipient": ISSUER,
+             "amount_uluxar": 1_000_000, "fee_uluxar": 1000, "memo": f"foundry:beta:action:{operation}:" + "c" * 64},
+            record(encode("c", cid(attempt), cid(operation), chash(paid_hash)), 8),
+            record(encode("d", cid(attempt), cid(IDS["version"]), "succeeded"), 9),
+            record(encode("p", cid(IDS["piece"]), cid(IDS["version"]), cid(IDS["account"]), cid(IDS["account"]), "native", cid(IDS["workspace"]), 1500), 10),
+        ])
+        digests = [memo_hash(item["memo"]) for item in records if item["memo"].startswith("foundry:t1:")]
+        digest, count = event_set(digests)
+        records.append(record(encode("z", cid(IDS["piece"]), "piece", chash(digest), count), 11))
+        seals = [{"transaction_hash": records[-1]["hash"].upper(), "event_hashes": digests}]
+        subject = {"scope": "piece", "id": IDS["piece"]}
+        self.assertTrue(verify_graph(records, seals, subject, ISSUER)["verified"])
+        records[-2] = record(encode("p", cid(IDS["piece"]), cid(IDS["version"]), cid(IDS["account"]), cid(IDS["account"]), "native", cid(IDS["other"]), 1500), 10)
+        with self.assertRaisesRegex(ValueError, "NATIVE_SOURCE_WORKSPACE_MISMATCH"):
+            verify_graph(records, seals, subject, ISSUER)
+
     def test_one_payment_cannot_fund_two_actions_or_unrelated_refund(self):
         records, seals, subject = fixture()
         attempt, other, operation, refund = [str(uuid.uuid4()) for _ in range(4)]

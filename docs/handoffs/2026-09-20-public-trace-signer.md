@@ -1,11 +1,15 @@
 # Public trace signer and verifier handoff — 2026-09-20
 
-Implemented and locally verified; **not hosted or used for live artwork migration**.
+Implemented, locally verified and **hosted through the coordinated additive
+signer upgrade at 2026-09-20 20:41 UTC**. No live artwork trace or migration
+transaction was sent by this component task.
 
 Independent parent review returned **APPROVE for the signer component and pinned
 image**: exact journal replay, atomic trace uniqueness, startup refusal, mirrored
 14-kind codec, receipt validation and hosted route boundary. This approval does
-not yet cover the operator upgrade recipe or the complete Foundry release.
+cover the complete Foundry release. The operator recipe separately received
+REVISE for a pre-quiescence snapshot, then APPROVE after fresh post-ingress and
+authoritative offline snapshots plus race/refusal tests were added.
 
 The sixth private signer route `/beta/trace` accepts only operation UUID, pinned
 genesis and a strict 256-byte ASCII `foundry:t1:` tuple. It signs a one-uluxar
@@ -29,18 +33,22 @@ The selected full-node RPC is trusted; this is not a consensus light client.
 
 Verified evidence:
 
-- All **74 Python unit/HTTP checks** pass, including malformed tuple/privacy,
+- All **75 Python unit/HTTP checks** pass, including malformed tuple/privacy,
   missing journal uniqueness mapping, forged issuer, graph omissions/order,
-  double-attributed payments and unrelated refunds.
+  double-attributed payments, unrelated refunds and publication-source binding
+  to the actual Gallery artwork or successful native action workspace.
 - Foundry's focused `beta-chain` and `beta-trace` checks pass: fourteen independent
   tuple vectors plus negative cases, bounded/secret-safe client and exact receipts.
 - `python verify_trace.py` passed on disposable network
-  `luxartium-check-073ad4f0dcb6`, genesis
-  `68827429bba32331000839835cb66163cea613eb3aad67a78bb5a7f78933348b`.
+  `luxartium-check-6c9f3e6e400f`, genesis
+  `4c5de29dc737f2067ff91806533cfc5a6824ac473fe7ae59465609c11a8a9604`.
   Its 29-transaction public proof contains 24 trace events: two identities, two
   versions, two publications, exact rental permission, two creative attempts,
   successful result, refund and sale. It proved restart replay, currentness/stale
   proof detection, wrong genesis/issuer, omitted records/seals and node restart.
+  The final run also enforces the exact native workspace and Gallery artwork
+  source links. Its final checkpoint is at height192, seal
+  `D125CEC100E557B88239A8CF07C1B3D6FA8CF8C731469FBF15972C039171AC5B`.
   Public evidence is in ignored `build/trace-verification.json`.
 - `python verify_hosted_signer.py --image luxartium-beta-signer:trace-review`
   passed selective key/journal export, source fence, private HTTP rejection,
@@ -62,9 +70,10 @@ The earlier failures were test defects: a verifier tuple initialization typo,
 CometBFT requiring JSON-quoted `order_by`, and a fixed one-second hosted restart
 wait. The final code has strict regression cases and bounded health readiness.
 
-Use [the upgrade runbook](../TRACE-SIGNER-UPGRADE.md) only after the coordinated
-application, migration and independent release review. No chain reset, live key
-export, hosted update, production push or live trace transaction occurred here.
+The reviewed chain changes were committed and pushed to
+`codex/testnet-alpha-transition` at `48131a9` before hosted activation. GitHub
+pushes do not deploy this chain. The image contains the reviewed signer runtime;
+later verifier-only assertions do not change that image.
 
 The companion [PowerShell recipe](../Upgrade-TraceSigner.ps1.example) has passed
 syntax parsing and a synthetic execution test under ignored `build/` for the
@@ -72,6 +81,30 @@ read-only plan, controlled upgrade, changed-journal fail-closed, operations arri
 after preflight/during shutdown, and pending-operation refusal before backup or
 configuration change. The authoritative baseline is read from the stopped volume. Every
 Docker/Python/task command was mocked; fixtures contain no live credentials.
-Actual hosted operation is still pending. Its backup preserves the current entire
-volume; image restoration instructions explicitly forbid overwriting newer keys
-or journal entries with an older snapshot.
+The approved recipe then completed on the dedicated host using its existing
+`py -3` reconciler. Its backup preserves the current entire volume; image
+restoration instructions explicitly forbid overwriting newer keys or journal
+entries with an older snapshot.
+
+Hosted acceptance, all read-only except the controlled sidecar upgrade:
+
+- Preserved **108 wallets and 110 operations**; zero pending operations and zero
+  trace operations after all checks. SQLite `quick_check` passed.
+- Protected offline backup:
+  `C:\Users\lando\.codex\luxartium-beta-hosting-20260920\trace-upgrade-20260920T204151752Z`;
+  archive SHA-256
+  `8302ece1ef89cfe389c7f454a36843246934c27aebf89fd24901248fb335f463`.
+- Same pinned genesis, treasury and validator container; validator started at
+  `2026-09-20T01:59:23.172997469Z` and was not restarted. Heights advanced from
+  `103919` to `103942`, catching up false, voting power `10000`.
+- New signer image is the reviewed `682c6d2e...69fb87` ID above. Only
+  `luxartium-beta-signer-state` is mounted. Recovery is enabled; last task result 0.
+- HTTPS rejection/acceptance: anonymous 401, Access credential only 403, both
+  credentials 200, browser Origin 403, legacy route 404, malformed trace 409 with
+  `INVALID_TRACE_EVENT`. The malformed body created no journal entry or transaction.
+- Original laptop signing fence parsed and remains present. Pinned SSH host
+  fingerprint was verified. No source signer, second writer, chain reset, new
+  validator, wallet rotation, Foundry release or live trace was performed.
+
+Public readiness evidence is in ignored `build/hosted-trace-*.json` and
+`build/hosted-trace-upgrade-result.txt`; no credentials or backup bytes are there.

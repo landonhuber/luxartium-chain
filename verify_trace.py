@@ -109,7 +109,7 @@ def verify():
             trace(encode("l", cid(ids["branch_version"]), None, cid(ids["version"])))
             trace(encode("b", cid(ids["branch_version"]), cid(ids["branch_asset"]), chash("4" * 64), "primary"))
             trace(encode("d", cid(ids["attempt"]), cid(ids["branch_version"]), "succeeded"))
-            trace(encode("p", cid(ids["branch_piece"]), cid(ids["branch_version"]), cid(ids["bob"]), cid(ids["bob"]), "native", cid(ids["branch"]), 4000))
+            trace(encode("p", cid(ids["branch_piece"]), cid(ids["branch_version"]), cid(ids["bob"]), cid(ids["bob"]), "native", cid(ids["workspace"]), 4000))
             sale_hash = transfer("sale", ids["bob"], ids["alice"], 20 * UNIT, ids["sale"])
             trace(encode("s", cid(ids["sale"]), cid(ids["piece"]), cid(ids["alice"]), cid(ids["bob"]), chash(sale_hash), chash(memo_hash(publication_memo))))
             trace(encode("a", cid(ids["failed"]), cid(ids["workspace"]), cid(ids["bob"]), "create_svg", chash("5" * 64)))

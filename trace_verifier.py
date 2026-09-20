@@ -220,10 +220,14 @@ def verify_graph(records, seals, subject, issuer):
             if event["origin"] != "native":
                 require(len(migrations) == 1, "MIGRATION_AUTHORIZATION_REQUIRED")
                 dependency(next(iter(migrations.values())))
+                if event["origin"] == "gallery":
+                    require(event["source_id"] == version["artwork_id"], "GALLERY_SOURCE_ARTWORK_MISMATCH")
             else:
                 completed = [value for value in results.values() if value[1]["version_id"] == event["version_id"] and value[1]["outcome"] == "succeeded"]
                 require(len(completed) == 1, "MISSING_NATIVE_CREATIVE_RESULT")
-                dependency(completed[0])
+                result = dependency(completed[0])
+                action = dependency(get(actions, result["attempt_id"], "MISSING_ACTION"))
+                require(action["workspace_id"] == event["source_id"], "NATIVE_SOURCE_WORKSPACE_MISMATCH")
             publications[event["piece_id"]] = (digest, event)
             owners[event["piece_id"]] = (digest, event["owner_account_id"])
         elif kind == "sale":
