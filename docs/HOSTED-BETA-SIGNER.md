@@ -23,6 +23,12 @@ Chain: `luxartium-local-1`; canonical genesis SHA-256:
 `dd59a7a33d4d2796e52f985ff913b1f158fe09fa2d044fc63b17d24d2c0d0707`.
 Initial signer image:
 `sha256:11465597fca45ee90659b341ded1ef5ac107b2877d5de43ba15ea18f12902f64`.
+The reviewed additive trace signer upgrade completed at 2026-09-20 20:41 UTC:
+`sha256:682c6d2e6be6c1e9322e42319af6e5711b2ff147324b031c7d77eb707069fb87`.
+It adds strict `/beta/trace` on the existing durable journal and preserves all
+108 wallet mappings and 110 prior operations. No artwork trace was emitted by
+the upgrade. See the [trace handoff](handoffs/2026-09-20-public-trace-signer.md)
+for offline backup, unchanged validator uptime and public boundary evidence.
 The pinned connector digest is recorded in `hosted_operator.py`.
 
 ## Startup and recovery

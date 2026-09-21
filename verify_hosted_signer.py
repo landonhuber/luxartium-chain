@@ -1,5 +1,6 @@
 """Disposable real-chain acceptance for isolated signer state, HTTP and replay."""
 import hashlib
+import argparse
 import json
 from pathlib import Path
 import secrets
@@ -13,12 +14,13 @@ from localnet import Network, run, UNIT, FEE
 from verify import available_ports, require
 from verify_beta_gateway import settled
 from export_hosted_signer import export
+from trace_protocol import compact
 
 LABEL = "org.luxartium.signer-test"
 IMAGE = "luxartium-beta-signer:0.1.0"
 
 
-def verify():
+def verify(image=IMAGE):
     identity = uuid.uuid4().hex[:12]
     network = Network("luxartium-check-" + identity, available_ports())
     container, volume = "luxartium-signer-check-" + identity, "luxartium-signer-check-" + identity + "-data"
@@ -65,7 +67,7 @@ def verify():
             created_volume = True
             mount = ["--mount", f"type=volume,source={volume},target=/state"]
             helper = ["docker", "run", "--rm", "-i", "--network", "none", "--read-only", "--cap-drop", "ALL", *mount,
-                      "--entrypoint", "python", IMAGE, "-c"]
+                      "--entrypoint", "python", image, "-c"]
             # New Docker volumes inherit the image's /state UID 10001 permissions.
             for filename in ("settlements.sqlite", "access.key"):
                 import base64
@@ -74,14 +76,14 @@ def verify():
             for exported_key in json.loads((exported_directory / "beta-keys.private.json").read_text()):
                 name, private = exported_key["name"], exported_key["private_key_hex"]
                 result = run(["docker", "run", "--rm", "-i", "--network", "none", "--read-only", "--cap-drop", "ALL", *mount,
-                              "--entrypoint", "luxartiumd", IMAGE, "keys", "import-hex", name,
+                              "--entrypoint", "luxartiumd", image, "keys", "import-hex", name,
                               "--keyring-backend", "test", "--home", "/state/keys"], input_text=private + "\n", check=False)
                 del private
                 require(result.returncode == 0, "selective beta key import")
             run(["docker", "run", "-d", "--name", container, "--label", LABEL + "=" + identity,
                  "--network", "container:" + network.name, "--read-only", "--cap-drop", "ALL",
                  "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "256m", "--cpus", "1",
-                 *mount, "-e", "LUXARTIUM_GENESIS_HASH=" + genesis, IMAGE])
+                 *mount, "-e", "LUXARTIUM_GENESIS_HASH=" + genesis, image])
             created_container = True
             def request(path, body, *, authorized=True, origin=None):
                 program = """import sys,json,urllib.request,urllib.error
@@ -97,16 +99,17 @@ except urllib.error.HTTPError as response: print(json.dumps({'status':response.c
                 result = run(["docker", "exec", "-i", container, "python", "-c", program],
                              input_text=json.dumps({"path": path, "body": body, "token": token if authorized else None, "origin": origin}))
                 return json.loads(result.stdout)
-            for attempt in range(30):
-                try:
-                    health = request("/beta/health", {})
-                    if health["status"] == 200:
-                        break
-                except RuntimeError:
-                    pass
-                time.sleep(.3)
-            else:
+            def ready():
+                for attempt in range(60):
+                    try:
+                        response = request("/beta/health", {})
+                        if response["status"] == 200:
+                            return response
+                    except RuntimeError:
+                        pass
+                    time.sleep(.3)
                 raise AssertionError("Isolated signer did not become ready")
+            health = ready()
             require(health["body"]["genesis_hash"] == genesis, "pinned chain health")
             require(request("/beta/health", {}, authorized=False)["status"] == 403, "unauthenticated request denied")
             require(request("/beta/health", {}, origin="https://aiartfoundry.com")["status"] == 403, "browser origin denied")
@@ -125,10 +128,21 @@ except urllib.error.HTTPError as response: print(json.dumps({'status':response.c
             pending = request("/beta/operation", action)["body"]
             require(pending["state"] in ("pending", "committed"), "real isolated signature broadcast")
             run(["docker", "restart", container])
-            time.sleep(1)
+            ready()
             paid = settled(lambda: request("/beta/operation", action)["body"])
             require(paid["transaction_hash"] == pending["transaction_hash"], "restart preserves exact signed bytes")
             require(int(request("/beta/wallet", {"account_id": account})["body"]["balance_uluxar"]) == BETA_WELCOME - UNIT - FEE, "one exact creative payment plus gas")
+            trace_memo = "foundry:t1:" + json.dumps(["i", compact(uuid.uuid4().bytes), compact(uuid.UUID(account).bytes), original_wallet["address"]], separators=(",", ":"))
+            trace = {"operation_id": str(uuid.uuid4()), "genesis_hash": genesis, "memo": trace_memo}
+            require(request("/beta/trace", {**trace, "private_key_hex": "synthetic-not-a-key"})["body"] == {"error": "INVALID_TRACE_OPERATION"}, "trace extra private fields are rejected without echo")
+            traced = request("/beta/trace", trace)["body"]
+            require(traced["state"] in ("pending", "committed"), "isolated trace signature broadcast")
+            run(["docker", "restart", container])
+            ready()
+            trace_receipt = settled(lambda: request("/beta/trace", trace)["body"])
+            require(trace_receipt["transaction_hash"] == traced["transaction_hash"] and trace_receipt["memo"] == trace_memo, "hosted trace restart preserves exact signed bytes")
+            require(trace_receipt["sender"] == health["body"]["treasury_address"] == trace_receipt["recipient"] and trace_receipt["amount_uluxar"] == "1", "hosted trace uses only treasury self-transfer")
+            require(request("/beta/trace", {**trace, "operation_id": str(uuid.uuid4())})["body"] == {"error": "TRACE_EVENT_ALREADY_BOUND"}, "hosted trace duplicate memo cannot acquire another operation")
             fresh = str(uuid.uuid4())
             fresh_delivery = {"account_id": fresh, "delivery_token": secrets.token_urlsafe(32)}
             new_wallet = request("/beta/provision", fresh_delivery)
@@ -178,4 +192,6 @@ except urllib.error.HTTPError as response: print(json.dumps({'status':response.c
 
 
 if __name__ == "__main__":
-    verify()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--image", default=IMAGE, help="Explicit locally built review image; no saved signer is replaced")
+    verify(parser.parse_args().image)

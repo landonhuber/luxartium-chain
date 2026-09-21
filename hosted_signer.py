@@ -19,7 +19,7 @@ from admin_auth import assert_plain_path
 from gateway import BetaSigner, BETA_TREASURY, GatewayHandler, canonical, exclusive_process
 from localnet import Network, CHAIN_ID
 
-ROUTES = frozenset(("/beta/health", "/beta/provision", "/beta/enroll", "/beta/wallet", "/beta/operation"))
+ROUTES = frozenset(("/beta/health", "/beta/provision", "/beta/enroll", "/beta/wallet", "/beta/operation", "/beta/trace"))
 KEY_NAME = re.compile(r"(?:foundry-beta|b-[a-f0-9]{32})")
 REQUIRED_TABLES = {
     "identity": "fingerprint",
