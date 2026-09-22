@@ -3,6 +3,7 @@ from contextlib import ExitStack, redirect_stdout
 from http.server import ThreadingHTTPServer
 import hashlib
 import json
+import os
 from pathlib import Path
 import secrets
 import sys
@@ -13,6 +14,7 @@ import uuid
 from gateway import BetaSigner, GatewayHandler, initialize_treasuries
 from localnet import Network, run
 from verify import available_ports
+import welcome_policy
 
 
 def main():
@@ -27,6 +29,15 @@ def main():
             stack.callback(signer.db.close)
             with redirect_stdout(sys.stderr):
                 initialize_treasuries(signer)
+            if os.environ.get('FOUNDRY_TEST_WELCOME_WATERFALL') == '1':
+                profiles = os.environ.get('FOUNDRY_TEST_WELCOME_LEGACY_PROFILES', '[]')
+                if len(profiles.encode()) > 16384:
+                    raise ValueError('Disposable legacy profile input exceeds fixture bound')
+                snapshot = {'version': 1, 'policy_id': welcome_policy.CAMPAIGN, 'genesis_hash': signer.fingerprint,
+                            'legacy_profiles': json.loads(profiles)}
+                digest = hashlib.sha256(welcome_policy.canonical(snapshot).encode()).hexdigest()
+                welcome_policy.activate(signer.db, snapshot, digest, signer.fingerprint)
+                signer.welcome_campaign = welcome_policy.initialize(signer.db, signer.fingerprint)
             server = stack.enter_context(ThreadingHTTPServer(('127.0.0.1', 0), GatewayHandler))
             key = secrets.token_urlsafe(32)
             server.signer = signer
@@ -36,7 +47,8 @@ def main():
             # Consumed by the parent process, never forwarded to tool/user output.
             print(json.dumps({'url': 'http://127.0.0.1:' + str(server.server_port), 'key': key, 'genesis': signer.fingerprint,
                               'rpc_url': 'http://127.0.0.1:' + str(network.ports[0]),
-                              'issuer_address': signer.beta_treasury()}), flush=True)
+                              'issuer_address': signer.beta_treasury(),
+                              'welcome_policy': signer.beta_health()['welcome_policy']}), flush=True)
             sys.stdin.readline()
             server.shutdown()
             thread.join()

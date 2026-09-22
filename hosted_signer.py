@@ -21,6 +21,7 @@ from localnet import Network, CHAIN_ID
 
 ROUTES = frozenset(("/beta/health", "/beta/provision", "/beta/enroll", "/beta/wallet", "/beta/operation", "/beta/trace"))
 KEY_NAME = re.compile(r"(?:foundry-beta|b-[a-f0-9]{32})")
+KEY_ADDRESS = re.compile(r"luxar1[0-9a-z]{38}")
 REQUIRED_TABLES = {
     "identity": "fingerprint",
     "operations": "id,payload,sender,recipient,amount,memo,signed,hash,state,result",
@@ -76,12 +77,23 @@ class HostedBetaSigner(BetaSigner):
         if genesis.get("chain_id") != CHAIN_ID or hashlib.sha256(canonical(genesis).encode()).hexdigest() != expected_genesis:
             raise ValueError("CHAIN_IDENTITY_CHANGED")
         names = json.loads(network.cli(["keys", "list", "--keyring-backend", "test", "--output", "json"]).stdout)
-        if not isinstance(names, list) or not names or any(not KEY_NAME.fullmatch(key.get("name", "")) for key in names):
+        if not isinstance(names, list) or not names:
             raise ValueError("UNRELATED_KEY_IN_SIGNER")
-        if network.address(BETA_TREASURY) != treasury[0]:
+        # The same pinned SDK supplies public keyring identities in one call.
+        # Avoid N CLI processes as the welcome campaign grows to thousands of
+        # wallets. Ordinary per-wallet operations still check their key directly.
+        addresses, unique_addresses = {}, set()
+        for key in names:
+            if not isinstance(key, dict) or not isinstance(key.get("name"), str) or not isinstance(key.get("address"), str) or not KEY_NAME.fullmatch(key["name"]) or not KEY_ADDRESS.fullmatch(key["address"]):
+                raise ValueError("UNRELATED_KEY_IN_SIGNER")
+            if key["name"] in addresses or key["address"] in unique_addresses:
+                raise ValueError("AMBIGUOUS_SIGNER_KEY")
+            addresses[key["name"]] = key["address"]
+            unique_addresses.add(key["address"])
+        if addresses.get(BETA_TREASURY) != treasury[0] or network.address(BETA_TREASURY) != treasury[0]:
             raise ValueError("TREASURY_IDENTITY_CHANGED")
         for account, address in wallets:
-            if network.address(self.key_name(account)) != address:
+            if addresses.get(self.key_name(account)) != address:
                 raise ValueError("WALLET_IDENTITY_CHANGED")
         super().__init__(directory, network)
 

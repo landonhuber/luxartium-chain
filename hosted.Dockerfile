@@ -5,7 +5,7 @@ COPY --from=chain /usr/local/bin/luxartiumd /usr/local/bin/luxartiumd
 RUN echo '9e6525c54904c72f688b4c3d827ddda8fb7b1b0bdc938bd0ac395c1d5dcb6512  /usr/local/bin/luxartiumd' | sha256sum -c - \
     && useradd --uid 10001 --create-home signer && mkdir /state && chown signer:signer /state
 WORKDIR /app
-COPY hosted_signer.py gateway.py trace_protocol.py localnet.py admin_auth.py ./
+COPY hosted_signer.py gateway.py trace_protocol.py welcome_policy.py activate_welcome_policy.py localnet.py admin_auth.py ./
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/home/signer
 USER 10001:10001
 ENTRYPOINT ["python", "/app/hosted_signer.py"]

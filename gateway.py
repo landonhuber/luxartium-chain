@@ -16,6 +16,7 @@ import uuid
 from admin_auth import owner_access_key, assert_plain_path
 from localnet import Network, CHAIN_ID, DENOM, FEE, UNIT, run
 from trace_protocol import decode as decode_trace, memo_hash as trace_memo_hash
+import welcome_policy
 
 PORT = 4175
 TREASURY = "foundry-pilot"
@@ -77,7 +78,7 @@ class Signer:
         old = self.db.execute("SELECT fingerprint FROM identity").fetchone()
         if old and old[0] != self.fingerprint:
             raise ValueError("Journal belongs to a different genesis")
-        self.db.execute("INSERT OR IGNORE INTO identity VALUES (?)", (self.fingerprint,))
+        self.db.execute("INSERT OR IGNORE INTO identity (fingerprint) VALUES (?)", (self.fingerprint,))
         self.db.execute("CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, payload TEXT NOT NULL, sender TEXT NOT NULL, recipient TEXT NOT NULL, amount INTEGER NOT NULL, memo TEXT NOT NULL, signed TEXT NOT NULL, hash TEXT UNIQUE NOT NULL, state TEXT NOT NULL, result TEXT)")
         self.db.execute("CREATE TABLE IF NOT EXISTS wallets (agent TEXT PRIMARY KEY, address TEXT UNIQUE NOT NULL)")
         self.db.commit()
@@ -227,6 +228,7 @@ class BetaSigner(Signer):
         self.db.commit()
         try:
             self.assert_trace_journal()
+            self.welcome_campaign = welcome_policy.initialize(self.db, self.fingerprint)
         except Exception:
             self.db.close()
             raise
@@ -269,7 +271,11 @@ class BetaSigner(Signer):
         with self.lock:
             self.assert_chain()
             return {"chain_id": CHAIN_ID, "genesis_hash": self.fingerprint,
-                    "treasury_address": self.beta_treasury()}
+                    "treasury_address": self.beta_treasury(),
+                    "welcome_policy": {"state": "active" if self.welcome_campaign else "legacy",
+                        "policy_id": welcome_policy.CAMPAIGN if self.welcome_campaign else welcome_policy.LEGACY,
+                        "snapshot_hash": self.db.execute("SELECT welcome_policy_hash FROM identity").fetchone()[0],
+                        "legacy_inventory_hash": hashlib.sha256(canonical(self.welcome_campaign["legacy_profiles"]).encode()).hexdigest() if self.welcome_campaign else None}}
 
     def beta_treasury(self):
         row = self.db.execute("SELECT treasury_address FROM beta_config WHERE id=1").fetchone()
@@ -301,7 +307,9 @@ class BetaSigner(Signer):
         if row is None:
             if not create:
                 raise ValueError("BETA_WALLET_NOT_FOUND")
-            if self.db.execute("SELECT count(*) FROM beta_wallets").fetchone()[0] >= 128:
+            if self.welcome_campaign and not self.db.execute("SELECT 1 FROM beta_welcome_allocations WHERE account=?", (account,)).fetchone():
+                raise ValueError("WELCOME_ALLOCATION_REQUIRED")
+            if not self.welcome_campaign and self.db.execute("SELECT count(*) FROM beta_wallets").fetchone()[0] >= 128:
                 raise ValueError("BETA_WALLET_CAPACITY")
             address = self.ensure_key(self.key_name(account))
             # Zero means public provisioning only: key delivery has not started.
@@ -313,13 +321,19 @@ class BetaSigner(Signer):
         return row
 
     def beta_provision(self, body):
-        if not isinstance(body, dict) or set(body) != {"account_id", "delivery_token"}:
+        fields = {"account_id", "delivery_token"}
+        if not isinstance(body, dict) or set(body) not in (fields, fields | {"welcome_grant"}):
             raise ValueError("INVALID_ENROLLMENT")
         account, token = identifier(body["account_id"]), body["delivery_token"]
         if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
             raise ValueError("INVALID_ENROLLMENT")
         with self.lock:
             self.assert_chain()
+            if "welcome_grant" in body:
+                if self.welcome_campaign:
+                    welcome_policy.bind(self.db, self.welcome_campaign, account, body["welcome_grant"])
+                elif welcome_policy.authorization(body["welcome_grant"])["policy_id"] != welcome_policy.LEGACY:
+                    raise ValueError("WELCOME_CAMPAIGN_NOT_ACTIVE")
             return self.beta_wallet_public(self.claim_beta_wallet(account, hashlib.sha256(token.encode()).hexdigest()))
 
     def beta_enroll(self, body):
@@ -332,7 +346,7 @@ class BetaSigner(Signer):
         digest = hashlib.sha256(token.encode()).hexdigest()
         with self.lock:
             self.assert_chain()
-            row = self.claim_beta_wallet(account, digest, not body["acknowledge"])
+            row = self.claim_beta_wallet(account, digest, not body["acknowledge"] and not self.welcome_campaign)
             public = self.beta_wallet_public(row)
             if row["delivery_expires"] == 0:
                 if body["acknowledge"]:
@@ -367,6 +381,8 @@ class BetaSigner(Signer):
         digest = trace_memo_hash(body["memo"])
         with self.lock:
             self.assert_chain()
+            if self.db.execute("SELECT 1 FROM beta_welcome_allocations WHERE operation=?", (operation,)).fetchone():
+                raise ValueError("WELCOME_OPERATION_RESERVED")
             treasury = self.beta_treasury()
             intent = self.db.execute("SELECT payload FROM beta_intents WHERE operation=?", (operation,)).fetchone()
             existing = self.db.execute("SELECT payload FROM operations WHERE id=?", (operation,)).fetchone()
@@ -383,12 +399,14 @@ class BetaSigner(Signer):
 
     def beta_operation(self, body):
         fields = {"operation_id", "kind", "from_account_id", "to_account_id", "amount_uluxar", "reference_hash", "reverses_operation_id", "genesis_hash"}
-        if not isinstance(body, dict) or set(body) != fields:
+        if not isinstance(body, dict) or set(body) not in (fields, fields | {"grant_authorization"}):
             raise ValueError("INVALID_BETA_OPERATION")
         operation = identifier(body["operation_id"])
         if operation in (BOOTSTRAP, BETA_BOOTSTRAP) or body["genesis_hash"] != self.fingerprint:
             raise ValueError("WRONG_NETWORK_OR_RESERVED_OPERATION")
         kind = body["kind"]
+        if "grant_authorization" in body and kind != "grant":
+            raise ValueError("INVALID_WELCOME_AUTHORIZATION")
         if kind not in ("grant", "action", "refund", "sale", "rent", "commit"):
             raise ValueError("INVALID_BETA_OPERATION")
         amount_text, reference = body["amount_uluxar"], body["reference_hash"]
@@ -403,7 +421,7 @@ class BetaSigner(Signer):
                 identifier(account)
         if kind != "refund" and reversal is not None:
             raise ValueError("INVALID_REVERSAL")
-        if kind == "grant" and (source is not None or destination is None or amount != BETA_WELCOME):
+        if kind == "grant" and (source is not None or destination is None):
             raise ValueError("INVALID_WELCOME_GRANT")
         if kind == "action" and (source is None or destination is not None or amount != UNIT):
             raise ValueError("INVALID_ACTION_PAYMENT")
@@ -415,6 +433,10 @@ class BetaSigner(Signer):
             raise ValueError("INVALID_REFUND")
         with self.lock:
             self.assert_chain()
+            if kind == "grant":
+                welcome_policy.check_grant(self.db, self.welcome_campaign, body)
+            elif self.db.execute("SELECT 1 FROM beta_welcome_allocations WHERE operation=?", (operation,)).fetchone():
+                raise ValueError("WELCOME_OPERATION_RESERVED")
             sender_name = self.key_name(source) if source else BETA_TREASURY
             if source:
                 if self.beta_wallet_record(source)["address"] != self.network.address(sender_name):

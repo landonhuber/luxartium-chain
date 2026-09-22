@@ -1,0 +1,238 @@
+# Welcome campaign cutover, pending independent release review. Copy to the dedicated host's protected operator
+# directory after release approval. Default is a read-only plan; -Execute performs
+# the controlled upgrade. It never restores an old volume or restarts a validator.
+[CmdletBinding()]
+param(
+  [Parameter(Mandatory)][string]$ConfigPath,
+  [Parameter(Mandatory)][string]$OperatorScript,
+  [Parameter(Mandatory)][string]$ImageId,
+  [Parameter(Mandatory)][string]$SnapshotPath,
+  [Parameter(Mandatory)][string]$SnapshotHash,
+  [Parameter(Mandatory)][string]$LegacyInventoryHash,
+  [ValidateRange(0,2147483647)][int]$ExpectedWalletCount = 108,
+  [switch]$Execute
+)
+$ErrorActionPreference = 'Stop'
+$taskName = 'Luxartium Private Beta Signer Recovery'
+$nodeName = 'luxartium-local-1'
+$signerName = 'luxartium-beta-signer'
+$connectorName = 'luxartium-beta-tunnel'
+$volumeName = 'luxartium-beta-signer-state'
+$expectedGenesis = 'dd59a7a33d4d2796e52f985ff913b1f158fe09fa2d044fc63b17d24d2c0d0707'
+$expectedTreasury = 'luxar1kyfg7ex2llzrctstgpkh7je50deyyvt9tfayug'
+$expectedBinary = '9e6525c54904c72f688b4c3d827ddda8fb7b1b0bdc938bd0ac395c1d5dcb6512'
+$nodeImage = 'sha256:bcf43413a0ea468c0fd6c48826e64cabe41366987d0a7e7fdbf406f6693ea272'
+function Invoke-Docker([string[]]$Arguments) {
+  $output = & docker @Arguments 2>&1
+  if ($LASTEXITCODE -ne 0) { throw 'Docker operation failed; inspect protected operator evidence.' }
+  return ($output -join "`n")
+}
+function Read-Docker([string]$Kind, [string]$Name) {
+  return @(Invoke-Docker -Arguments @($Kind, 'inspect', $Name) | ConvertFrom-Json)[0]
+}
+function Assert-OwnedSidecar([string]$Name) {
+  $item = Read-Docker 'container' $Name
+  if ($item.Config.Labels.'org.luxartium.private-beta' -ne 'signer-v1') { throw 'Refusing an unrelated sidecar.' }
+  return $item
+}
+function Assert-SignerState($Container) {
+  $stateMounts = @($Container.Mounts | Where-Object { $_.Destination -eq '/state' })
+  if ($stateMounts.Count -ne 1 -or $stateMounts[0].Type -ne 'volume' -or $stateMounts[0].Name -ne $volumeName -or $stateMounts[0].RW -ne $true) {
+    throw 'Running signer must use the exact current writable state volume.'
+  }
+}
+function Assert-PlainPath([string]$Path) {
+  $item = Get-Item -LiteralPath $Path
+  while ($null -ne $item) {
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse points are not permitted.' }
+    $item = if ($item -is [IO.FileInfo]) { $item.Directory } else { $item.Parent }
+  }
+}
+function Protect-Directory([string]$Path) {
+  $policy = [Security.AccessControl.DirectorySecurity]::new()
+  $policy.SetAccessRuleProtection($true, $false)
+  foreach ($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+    $policy.AddAccessRule($rule)
+  }
+  Set-Acl -LiteralPath $Path -AclObject $policy
+}
+function Encode-Python([string]$Program) {
+  # Windows PowerShell 5 native argv rewriting must not strip Python/SQL quotes.
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Program))
+  return "exec(__import__('base64').b64decode('$encoded'))"
+}
+$snapshotProgram = @'
+import hashlib,json,sqlite3
+db=sqlite3.connect('file:/state/settlements.sqlite?mode=ro',uri=True)
+assert db.execute('PRAGMA quick_check').fetchall()==[('ok',)]
+wallets=dict(db.execute('SELECT account,address FROM beta_wallets'))
+operations={r[0]:r[1] for r in db.execute('SELECT id,hash FROM operations')}
+assert db.execute('SELECT count(*) FROM operations WHERE state="pending"').fetchone()[0]==0
+print(json.dumps({'wallets':wallets,'operations':operations,'genesis':db.execute('SELECT fingerprint FROM identity').fetchone()[0],'treasury':db.execute('SELECT treasury_address FROM beta_config WHERE id=1').fetchone()[0]}))
+db.close()
+'@
+$snapshotArgument = Encode-Python $snapshotProgram
+function Read-Snapshot {
+  return Invoke-Docker -Arguments @('exec', $signerName, 'python', '-c', $snapshotArgument) | ConvertFrom-Json
+}
+function Assert-Snapshot($Snapshot) {
+  if (@($Snapshot.wallets.PSObject.Properties).Count -ne $ExpectedWalletCount -or $Snapshot.genesis -ne $expectedGenesis -or $Snapshot.treasury -ne $expectedTreasury) {
+    throw 'Current wallet count, treasury or genesis requires reconciliation.'
+  }
+}
+$healthProgram = @'
+import json,pathlib,urllib.request,urllib.error,uuid
+key=pathlib.Path('/state/access.key').read_text().strip()
+headers={'Content-Type':'application/json','Authorization':'Bearer '+key}
+def call(path,body,request_headers=None):
+ r=urllib.request.Request('http://127.0.0.1:4175'+path,data=json.dumps(body).encode(),headers=headers if request_headers is None else request_headers)
+ try:
+  with urllib.request.urlopen(r,timeout=20) as response:return response.status,json.load(response)
+ except urllib.error.HTTPError as response:return response.code,json.load(response)
+status,health=call('/beta/health',{})
+assert status==200
+assert call('/beta/health',{}, {'Content-Type':'application/json'})[0]==403
+assert call('/beta/health',{},dict(headers,Origin='https://aiartfoundry.com'))[0]==403
+assert call('/beta/health?extra=1',{})[0]==404
+assert call('/transfer',{})[0]==404
+status,rejection=call('/beta/trace',{'operation_id':str(uuid.uuid4()),'genesis_hash':health['genesis_hash'],'memo':'invalid-protocol'})
+assert status==409 and rejection=={'error':'INVALID_TRACE_EVENT'}
+print(json.dumps(health))
+'@
+$healthArgument = Encode-Python $healthProgram
+
+Assert-PlainPath $ConfigPath
+Assert-PlainPath $OperatorScript
+Assert-PlainPath $SnapshotPath
+$snapshotFile = (Resolve-Path -LiteralPath $SnapshotPath).Path
+if ((Get-Item -LiteralPath $snapshotFile).Length -gt 16777216 -or $SnapshotHash -notmatch '^[a-f0-9]{64}$' -or $LegacyInventoryHash -notmatch '^[a-f0-9]{64}$') { throw 'Bounded, pinned public welcome snapshot required.' }
+$configFile = (Resolve-Path -LiteralPath $ConfigPath).Path
+$operatorFile = (Resolve-Path -LiteralPath $OperatorScript).Path
+$operatorDirectory = Split-Path -Parent $configFile
+$configBytes = [IO.File]::ReadAllBytes($configFile)
+$configuration = [Text.Encoding]::UTF8.GetString($configBytes) | ConvertFrom-Json
+if ($ImageId -notmatch '^sha256:[a-f0-9]{64}$' -or $configuration.genesis_hash -ne $expectedGenesis) { throw 'Image and preserved genesis must be pinned.' }
+$task = Get-ScheduledTask -TaskName $taskName
+$wasEnabled = [bool]$task.Settings.Enabled
+$nodeBefore = Read-Docker 'container' $nodeName
+if (!$nodeBefore.State.Running -or $nodeBefore.Image -ne $nodeImage -or $nodeBefore.Config.Labels.'io.aiartfoundry.luxartium' -ne 'localnet-v1') { throw 'Expected existing validator is unavailable.' }
+$signerBefore = Assert-OwnedSidecar $signerName
+Assert-SignerState $signerBefore
+if (!$signerBefore.State.Running -or !$signerBefore.Id) { throw 'Expected current signer is unavailable.' }
+$null = Assert-OwnedSidecar $connectorName
+$volume = Read-Docker 'volume' $volumeName
+if ($volume.Labels.'org.luxartium.private-beta' -ne 'signer-v1') { throw 'Expected current signer volume is unavailable.' }
+$image = Read-Docker 'image' $ImageId
+if ($image.Id -ne $ImageId) { throw 'Exact reviewed signer image must already be loaded.' }
+$binary = Invoke-Docker -Arguments @('run','--rm','--network','none','--read-only','--entrypoint','sha256sum',$ImageId,'/usr/local/bin/luxartiumd')
+if (!$binary.StartsWith($expectedBinary + ' ')) { throw 'Reviewed chain binary mismatch.' }
+$validateSnapshot = @'
+import hashlib,json,pathlib,welcome_policy
+value=welcome_policy.snapshot(json.loads(pathlib.Path('/run/welcome-snapshot.json').read_text()),'dd59a7a33d4d2796e52f985ff913b1f158fe09fa2d044fc63b17d24d2c0d0707')
+print(json.dumps({'snapshot_hash':hashlib.sha256(welcome_policy.canonical(value).encode()).hexdigest(),'legacy_inventory_hash':hashlib.sha256(welcome_policy.canonical(value['legacy_profiles']).encode()).hexdigest(),'legacy_profiles':len(value['legacy_profiles'])}))
+'@
+$snapshotMetadata = Invoke-Docker -Arguments @('run','--rm','--network','none','--read-only','--cap-drop','ALL','--mount',"type=bind,source=$snapshotFile,target=/run/welcome-snapshot.json,readonly",'--entrypoint','python',$ImageId,'-c',(Encode-Python $validateSnapshot)) | ConvertFrom-Json
+if ($snapshotMetadata.snapshot_hash -ne $SnapshotHash -or $snapshotMetadata.legacy_inventory_hash -ne $LegacyInventoryHash) { throw 'Frozen welcome inventory hashes differ.' }
+$before = Read-Snapshot
+Assert-Snapshot $before
+$plan = @{mode='plan'; old_image=$configuration.signer_image; new_image=$ImageId; genesis=$expectedGenesis; wallets=$ExpectedWalletCount; recovery_enabled=$wasEnabled; node_started_at=$nodeBefore.State.StartedAt; snapshot_hash=$SnapshotHash; legacy_inventory_hash=$LegacyInventoryHash; legacy_profiles=$snapshotMetadata.legacy_profiles}
+if (!$Execute) { $plan | ConvertTo-Json; return }
+
+# The original laptop source fence must be verified separately before execution.
+# No archive is made while recovery or either signing sidecar can run.
+$backupDirectory = Join-Path $operatorDirectory ('welcome-upgrade-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))
+if (Test-Path -LiteralPath $backupDirectory) { throw 'Backup destination already exists.' }
+$null = New-Item -ItemType Directory -Path $backupDirectory
+Protect-Directory $backupDirectory
+Disable-ScheduledTask -TaskName $taskName | Out-Null
+$lock = $null
+$locked = $false
+try {
+  $lock = [IO.File]::Open((Join-Path $operatorDirectory 'reconcile.lock'), 'OpenOrCreate', 'ReadWrite', 'ReadWrite')
+  $deadline = [DateTime]::UtcNow.AddSeconds(60)
+  while (!$locked) {
+    try { $lock.Lock(0,1); $locked = $true }
+    catch [IO.IOException] { if ([DateTime]::UtcNow -ge $deadline) { throw 'An existing reconciler did not finish.' }; Start-Sleep -Milliseconds 500 }
+  }
+  $null = Assert-OwnedSidecar $connectorName
+  $null = Invoke-Docker -Arguments @('stop','--time','30',$connectorName)
+  if ((Read-Docker 'container' $connectorName).State.Running) { throw 'Connector remained running; no backup is permitted.' }
+  # Refresh after the external entrance is closed, not from the earlier plan.
+  # The snapshot refuses pending transfers before any archive/configuration change.
+  $before = Read-Snapshot
+  Assert-Snapshot $before
+  $signerToStop = Assert-OwnedSidecar $signerName
+  Assert-SignerState $signerToStop
+  if ($signerToStop.Id -ne $signerBefore.Id) { throw 'Signer generation changed before offline backup.' }
+  $null = Invoke-Docker -Arguments @('stop','--time','30',$signerName)
+  $stoppedSigner = Assert-OwnedSidecar $signerName
+  Assert-SignerState $stoppedSigner
+  if ($stoppedSigner.State.Running -or $stoppedSigner.Id -ne $signerBefore.Id) { throw 'Signer did not stop at the expected generation; no backup is permitted.' }
+  # An already-admitted handler could finish during shutdown. The stopped-volume
+  # snapshot is the authoritative backup baseline and also refuses pending writes.
+  $before = Invoke-Docker -Arguments @('run','--rm','--network','none','--read-only','--cap-drop','ALL','--mount',"type=volume,source=$volumeName,target=/state,readonly",'--entrypoint','python',$ImageId,'-c',$snapshotArgument) | ConvertFrom-Json
+  Assert-Snapshot $before
+  [IO.File]::WriteAllBytes((Join-Path $backupDirectory 'operator-config.before.json'),$configBytes)
+  $before | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $backupDirectory 'mapping.before.json') -Encoding utf8
+  $archiveProgram = "import tarfile; archive=tarfile.open('/backup/signer-state.tar','w'); archive.add('/source',arcname='state'); archive.close()"
+  $null = Invoke-Docker -Arguments @('run','--rm','--network','none','--read-only','--cap-drop','ALL','--mount',"type=volume,source=$volumeName,target=/source,readonly",'--mount',"type=bind,source=$backupDirectory,target=/backup",'--entrypoint','python',$ImageId,'-c',(Encode-Python $archiveProgram))
+  $backupHash = (Get-FileHash -LiteralPath (Join-Path $backupDirectory 'signer-state.tar') -Algorithm SHA256).Hash.ToLowerInvariant()
+  # Activate only after the fresh complete offline backup. This acquires the
+  # signer's own gateway lock and validates a copy before applying to current state.
+  $activationArgs = @('run','--rm','--network','none','--read-only','--cap-drop','ALL','--mount',"type=volume,source=$volumeName,target=/state",'--mount',"type=bind,source=$snapshotFile,target=/run/welcome-snapshot.json,readonly",'--entrypoint','python',$ImageId,'/app/activate_welcome_policy.py','--directory','/state','--snapshot','/run/welcome-snapshot.json','--snapshot-sha256',$SnapshotHash,'--genesis',$expectedGenesis)
+  $dryRun = Invoke-Docker -Arguments $activationArgs | ConvertFrom-Json
+  if ($dryRun.applied -ne $false -or $dryRun.snapshot_hash -ne $SnapshotHash) { throw 'Offline welcome activation validation failed.' }
+  $activation = Invoke-Docker -Arguments ($activationArgs + @('--apply')) | ConvertFrom-Json
+  if ($activation.applied -ne $true -or $activation.snapshot_hash -ne $SnapshotHash) { throw 'Welcome activation requires manual reconciliation; recovery stays disabled.' }
+  $activation | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $backupDirectory 'welcome-activation.json') -Encoding utf8
+  $configuration.signer_image = $ImageId
+  [IO.File]::WriteAllText($configFile,($configuration | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+} finally {
+  if ($locked) { $lock.Unlock(0,1) }
+  if ($null -ne $lock) { $lock.Dispose() }
+}
+
+# Recovery stays disabled on any failure; do not restore an old archive. The
+# existing tested reconciler creates only the two owned sidecars, using current state.
+try {
+& py -3 $operatorFile --config $configFile
+if ($LASTEXITCODE -ne 0) { throw 'Reconciliation failed; keep recovery disabled and retain the current volume.' }
+Assert-SignerState (Assert-OwnedSidecar $signerName)
+$health = $null
+$healthDeadline = [DateTime]::UtcNow.AddSeconds(90)
+while ([DateTime]::UtcNow -lt $healthDeadline) {
+  try { $health = Invoke-Docker -Arguments @('exec',$signerName,'python','-c',$healthArgument) | ConvertFrom-Json; break }
+  catch { Start-Sleep -Milliseconds 500 }
+}
+if (!$health -or $health.genesis_hash -ne $expectedGenesis -or $health.treasury_address -ne $expectedTreasury) { throw 'New signer health or strict trace boundary failed; keep recovery disabled.' }
+if ($health.welcome_policy.state -ne 'active' -or $health.welcome_policy.policy_id -ne 'welcome-waterfall-v1' -or $health.welcome_policy.snapshot_hash -ne $SnapshotHash -or $health.welcome_policy.legacy_inventory_hash -ne $LegacyInventoryHash) { throw 'Active welcome policy does not match the frozen inventory; keep recovery disabled.' }
+$after = Read-Snapshot
+foreach ($group in @('wallets','operations')) {
+  foreach ($entry in $before.$group.PSObject.Properties) {
+    if ($after.$group.($entry.Name) -ne $entry.Value) { throw 'Current wallet or journal mapping changed; keep recovery disabled.' }
+  }
+}
+$nodeAfter = Read-Docker 'container' $nodeName
+if ($nodeAfter.Id -ne $nodeBefore.Id -or $nodeAfter.State.StartedAt -ne $nodeBefore.State.StartedAt) { throw 'Validator generation changed during sidecar upgrade.' }
+$report = @{mode='complete'; image=$ImageId; genesis=$expectedGenesis; backup_directory=$backupDirectory; backup_sha256=$backupHash; preserved_wallets=$ExpectedWalletCount; original_operations=@($before.operations.PSObject.Properties).Count; validator_restarted=$false; recovery_enabled=$wasEnabled; welcome_policy='welcome-waterfall-v1'; snapshot_hash=$SnapshotHash; legacy_inventory_hash=$LegacyInventoryHash; legacy_profiles=$snapshotMetadata.legacy_profiles}
+$report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $backupDirectory 'upgrade-result.json') -Encoding utf8
+if ($wasEnabled) { Enable-ScheduledTask -TaskName $taskName | Out-Null }
+$report | ConvertTo-Json
+} catch {
+  # Do not leave an unverified writer reachable. These are the already-verified
+  # owned sidecars only; no validator or volume is stopped or modified here.
+  Disable-ScheduledTask -TaskName $taskName | Out-Null
+  foreach ($name in @($connectorName,$signerName)) {
+    try {
+      $null = Assert-OwnedSidecar $name
+      $null = Invoke-Docker -Arguments @('stop','--time','30',$name)
+    } catch { } # Preserve the original failure; inspect any stop failure locally.
+  }
+  throw 'Signer validation failed; recovery remains disabled. Inspect the protected backup and stopped sidecars before recovery.'
+}
+
+# Never restore the older signer image after campaign activation: it lacks this
+# authorization boundary. Keep Foundry admission frozen and use the current
+# compatible signer state to recover. Do not extract an old archive over newer
+# signatures, keys or allocations. Validator history cannot be rolled back.

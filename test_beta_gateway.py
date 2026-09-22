@@ -197,7 +197,8 @@ class GatewayHTTPTests(GatewayFixture):
             self.assertEqual(status, 200)
             self.assertEqual(headers["Cache-Control"], "no-store")
             self.assertEqual(json.loads(raw), {"chain_id": CHAIN_ID, "genesis_hash": self.signer.fingerprint,
-                                              "treasury_address": self.network.address(BETA_TREASURY)})
+                                              "treasury_address": self.network.address(BETA_TREASURY),
+                                              "welcome_policy": {"state": "legacy", "policy_id": "legacy-flat-500", "snapshot_hash": None, "legacy_inventory_hash": None}})
         self.assertEqual(observed, ["chain", "treasury"] * 8)
         self.assertEqual(self.network.signatures, 0)
         self.assertEqual(self.network.exports, 0)
